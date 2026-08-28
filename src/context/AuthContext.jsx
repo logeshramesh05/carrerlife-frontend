@@ -1,10 +1,17 @@
 import {
   createContext,
   useContext,
+  useEffect,
+  useMemo,
   useState
 } from "react";
 
-import * as authApi from "../api/auth";
+import {
+  login as loginApi,
+  register as registerApi,
+  logout as logoutApi
+} from "../api/auth";
+
 import { tokenStore } from "../api/tokenStore";
 
 const AuthContext =
@@ -17,6 +24,49 @@ export function AuthProvider({
     useState(() =>
       tokenStore.getUser()
     );
+
+  const [loading, setLoading] =
+    useState(true);
+
+  useEffect(() => {
+    const storedUser =
+      tokenStore.getUser();
+
+    const accessToken =
+      tokenStore.getAccessToken();
+
+    const refreshToken =
+      tokenStore.getRefreshToken();
+
+    if (
+      storedUser &&
+      accessToken &&
+      refreshToken
+    ) {
+      setUser(storedUser);
+    } else {
+      tokenStore.clear();
+      setUser(null);
+    }
+
+    setLoading(false);
+
+    const handleLogout = () => {
+      setUser(null);
+    };
+
+    window.addEventListener(
+      "careerlife:logout",
+      handleLogout
+    );
+
+    return () => {
+      window.removeEventListener(
+        "careerlife:logout",
+        handleLogout
+      );
+    };
+  }, []);
 
   const applySession = (data) => {
     if (
@@ -31,8 +81,8 @@ export function AuthProvider({
     tokenStore.setTokens(data);
 
     const currentUser = {
-      email: data.email,
-      name: data.name
+      name: data.name,
+      email: data.email
     };
 
     tokenStore.setUser(
@@ -40,14 +90,18 @@ export function AuthProvider({
     );
 
     setUser(currentUser);
+
+    return currentUser;
   };
 
-  const login = async (
+  const register = async (
+    name,
     email,
     password
   ) => {
     const data =
-      await authApi.login(
+      await registerApi(
+        name,
         email,
         password
       );
@@ -57,14 +111,12 @@ export function AuthProvider({
     return data;
   };
 
-  const register = async (
-    name,
+  const login = async (
     email,
     password
   ) => {
     const data =
-      await authApi.register(
-        name,
+      await loginApi(
         email,
         password
       );
@@ -80,7 +132,7 @@ export function AuthProvider({
 
     try {
       if (refreshToken) {
-        await authApi.logout(
+        await logoutApi(
           refreshToken
         );
       }
@@ -89,24 +141,47 @@ export function AuthProvider({
       setUser(null);
 
       window.dispatchEvent(
-        new Event("careerlife:logout")
+        new Event(
+          "careerlife:logout"
+        )
       );
     }
   };
 
+  const value = useMemo(
+    () => ({
+      user,
+      loading,
+      isAuthenticated:
+        Boolean(
+          tokenStore.getAccessToken() &&
+          tokenStore.getRefreshToken()
+        ),
+      register,
+      login,
+      logout
+    }),
+    [user, loading]
+  );
+
   return (
     <AuthContext.Provider
-      value={{
-        user,
-        login,
-        register,
-        logout
-      }}
+      value={value}
     >
       {children}
     </AuthContext.Provider>
   );
 }
 
-export const useAuth = () =>
-  useContext(AuthContext);
+export function useAuth() {
+  const context =
+    useContext(AuthContext);
+
+  if (!context) {
+    throw new Error(
+      "useAuth must be used inside AuthProvider"
+    );
+  }
+
+  return context;
+}
