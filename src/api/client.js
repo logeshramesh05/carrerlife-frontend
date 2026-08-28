@@ -24,6 +24,33 @@ const refreshClient = axios.create({
   withCredentials: false
 });
 
+const authPaths = new Set([
+  "/auth/register",
+  "/auth/login",
+  "/auth/refresh",
+  "/auth/logout"
+]);
+
+const getPath = (url = "") => {
+  try {
+    return new URL(url, baseURL).pathname;
+  } catch {
+    return url.split("?")[0];
+  }
+};
+
+const isAuthRequest = (url = "") => {
+  const path = getPath(url);
+
+  return (
+    authPaths.has(path) ||
+    path.endsWith("/auth/register") ||
+    path.endsWith("/auth/login") ||
+    path.endsWith("/auth/refresh") ||
+    path.endsWith("/auth/logout")
+  );
+};
+
 let refreshPromise = null;
 
 const refreshAccessToken = async () => {
@@ -73,11 +100,16 @@ const clearSession = () => {
 
 client.interceptors.request.use(
   (config) => {
-    const accessToken =
-      tokenStore.getAccessToken();
-
     config.headers =
       config.headers || {};
+
+    if (isAuthRequest(config.url)) {
+      delete config.headers.Authorization;
+      return config;
+    }
+
+    const accessToken =
+      tokenStore.getAccessToken();
 
     if (accessToken) {
       config.headers.Authorization =
@@ -87,7 +119,9 @@ client.interceptors.request.use(
     }
 
     return config;
-  }
+  },
+  (error) =>
+    Promise.reject(error)
 );
 
 client.interceptors.response.use(
@@ -99,7 +133,8 @@ client.interceptors.response.use(
     if (
       !original ||
       error.response?.status !== 401 ||
-      original._retry
+      original._retry ||
+      isAuthRequest(original.url)
     ) {
       return Promise.reject(error);
     }
