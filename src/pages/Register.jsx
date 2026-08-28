@@ -16,11 +16,25 @@ export default function Register() {
     e.preventDefault();
     setError("");
     setLoading(true);
+
     try {
-      await register(name, email, password);
-      navigate("/dashboard");
+      const data = await register(
+        name.trim(),
+        email.trim().toLowerCase(),
+        password
+      );
+
+      if (!data?.accessToken || !data?.refreshToken) {
+        throw new Error("Authentication tokens were not returned");
+      }
+
+      navigate("/dashboard", { replace: true });
     } catch (err) {
-      setError(err.response?.data?.message || "Registration failed");
+      setError(
+        err.response?.data?.message ||
+        err.message ||
+        "Registration failed"
+      );
     } finally {
       setLoading(false);
     }
