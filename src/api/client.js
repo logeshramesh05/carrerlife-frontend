@@ -6,34 +6,7 @@ const baseURL = (
   "http://localhost:8080/api/v1"
 ).replace(/\/+$/, "");
 
-const authPaths = new Set([
-  "/auth/register",
-  "/auth/login",
-  "/auth/refresh",
-  "/auth/logout"
-]);
-
-const getPath = (url = "") => {
-  try {
-    return new URL(url, baseURL).pathname;
-  } catch {
-    return url.split("?")[0];
-  }
-};
-
-const isAuthRequest = (url) => {
-  const path = getPath(url);
-
-  return (
-    authPaths.has(path) ||
-    path.endsWith("/auth/register") ||
-    path.endsWith("/auth/login") ||
-    path.endsWith("/auth/refresh") ||
-    path.endsWith("/auth/logout")
-  );
-};
-
-const client = axios.create({
+const authClient = axios.create({
   baseURL,
   timeout: 30000,
   headers: {
@@ -42,153 +15,71 @@ const client = axios.create({
   withCredentials: false
 });
 
-const refreshClient = axios.create({
-  baseURL,
-  timeout: 15000,
-  headers: {
-    "Content-Type": "application/json"
-  },
-  withCredentials: false
-});
-
-let refreshPromise = null;
-
-const refreshAccessToken = async () => {
-  if (!refreshPromise) {
-    const refreshToken =
-      tokenStore.getRefreshToken();
-
-    if (!refreshToken) {
-      throw new Error(
-        "Refresh token unavailable"
-      );
+export const register = async (
+  name,
+  email,
+  password
+) => {
+  const response = await authClient.post(
+    "/auth/register",
+    {
+      name: name.trim(),
+      email: email.trim().toLowerCase(),
+      password
     }
-
-    refreshPromise = refreshClient
-      .post("/auth/refresh", {
-        refreshToken
-      })
-      .then(({ data }) => {
-        if (
-          !data?.accessToken ||
-          !data?.refreshToken
-        ) {
-          throw new Error(
-            "Invalid refresh response"
-          );
-        }
-
-        tokenStore.setTokens(data);
-
-        return data.accessToken;
-      })
-      .finally(() => {
-        refreshPromise = null;
-      });
-  }
-
-  return refreshPromise;
-};
-
-const clearSession = () => {
-  tokenStore.clear();
-
-  window.dispatchEvent(
-    new Event("careerlife:logout")
   );
+
+  const data = response.data;
+
+  if (
+    !data?.accessToken ||
+    !data?.refreshToken
+  ) {
+    throw new Error(
+      "Registration succeeded but authentication tokens were not returned"
+    );
+  }
+
+  return data;
 };
 
-client.interceptors.request.use(
-  (config) => {
-    const authRequest =
-      isAuthRequest(config.url);
-
-    config.headers =
-      config.headers || {};
-
-    if (authRequest) {
-      delete config.headers.Authorization;
-      return config;
+export const login = async (
+  email,
+  password
+) => {
+  const response = await authClient.post(
+    "/auth/login",
+    {
+      email: email.trim().toLowerCase(),
+      password
     }
+  );
 
-    const accessToken =
-      tokenStore.getAccessToken();
+  return response.data;
+};
 
-    if (accessToken) {
-      config.headers.Authorization =
-        `Bearer ${accessToken}`;
-    } else {
-      delete config.headers.Authorization;
+export const refresh = async (
+  refreshToken
+) => {
+  const response = await authClient.post(
+    "/auth/refresh",
+    {
+      refreshToken
     }
+  );
 
-    return config;
-  },
-  (error) =>
-    Promise.reject(error)
-);
+  return response.data;
+};
 
-client.interceptors.response.use(
-  (response) => response,
-  async (error) => {
-    const original =
-      error.config;
-
-    if (!original) {
-      return Promise.reject(error);
+export const logout = async (
+  refreshToken
+) => {
+  const response = await authClient.post(
+    "/auth/logout",
+    {
+      refreshToken
     }
+  );
 
-    const status =
-      error.response?.status;
-
-    const authRequest =
-      isAuthRequest(original.url);
-
-    if (
-      status !== 401 ||
-      original._retry ||
-      authRequest
-    ) {
-      return Promise.reject(error);
-    }
-
-    original._retry = true;
-
-    try {
-      const accessToken =
-        await refreshAccessToken();
-
-      original.headers =
-        original.headers || {};
-
-      original.headers.Authorization =
-        `Bearer ${accessToken}`;
-
-      return client(original);
-    } catch (refreshError) {
-      clearSession();
-
-      const publicRoutes = [
-        "/",
-        "/login",
-        "/register",
-        "/docs"
-      ];
-
-      if (
-        !publicRoutes.includes(
-          window.location.pathname
-        )
-      ) {
-        window.location.assign(
-          "/login"
-        );
-      }
-
-      return Promise.reject(
-        refreshError
-      );
-    }
-  }
-);
-
-export default client;
+  return response.data;
+};
