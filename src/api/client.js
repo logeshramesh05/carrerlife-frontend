@@ -4,14 +4,42 @@ import { tokenStore } from "./tokenStore";
 const baseURL = (
   import.meta.env.VITE_API_BASE_URL ||
   "http://localhost:8080/api/v1"
-).replace(/\/$/, "");
+).replace(/\/+$/, "");
+
+const authPaths = new Set([
+  "/auth/register",
+  "/auth/login",
+  "/auth/refresh",
+  "/auth/logout"
+]);
+
+const getPath = (url = "") => {
+  try {
+    return new URL(url, baseURL).pathname;
+  } catch {
+    return url.split("?")[0];
+  }
+};
+
+const isAuthRequest = (url) => {
+  const path = getPath(url);
+
+  return (
+    authPaths.has(path) ||
+    path.endsWith("/auth/register") ||
+    path.endsWith("/auth/login") ||
+    path.endsWith("/auth/refresh") ||
+    path.endsWith("/auth/logout")
+  );
+};
 
 const client = axios.create({
   baseURL,
   timeout: 30000,
   headers: {
     "Content-Type": "application/json"
-  }
+  },
+  withCredentials: false
 });
 
 const refreshClient = axios.create({
@@ -19,17 +47,21 @@ const refreshClient = axios.create({
   timeout: 15000,
   headers: {
     "Content-Type": "application/json"
-  }
+  },
+  withCredentials: false
 });
 
 let refreshPromise = null;
 
 const refreshAccessToken = async () => {
   if (!refreshPromise) {
-    const refreshToken = tokenStore.getRefreshToken();
+    const refreshToken =
+      tokenStore.getRefreshToken();
 
     if (!refreshToken) {
-      throw new Error("Refresh token unavailable");
+      throw new Error(
+        "Refresh token unavailable"
+      );
     }
 
     refreshPromise = refreshClient
@@ -37,7 +69,17 @@ const refreshAccessToken = async () => {
         refreshToken
       })
       .then(({ data }) => {
+        if (
+          !data?.accessToken ||
+          !data?.refreshToken
+        ) {
+          throw new Error(
+            "Invalid refresh response"
+          );
+        }
+
         tokenStore.setTokens(data);
+
         return data.accessToken;
       })
       .finally(() => {
@@ -50,40 +92,61 @@ const refreshAccessToken = async () => {
 
 const clearSession = () => {
   tokenStore.clear();
-  window.dispatchEvent(new Event("careerlife:logout"));
+
+  window.dispatchEvent(
+    new Event("careerlife:logout")
+  );
 };
 
 client.interceptors.request.use(
   (config) => {
-    const token = tokenStore.getAccessToken();
-    const isAuthRequest = config.url?.startsWith("/auth/");
+    const authRequest =
+      isAuthRequest(config.url);
 
-    if (token && !isAuthRequest) {
-      config.headers = config.headers || {};
-      config.headers.Authorization = `Bearer ${token}`;
+    config.headers =
+      config.headers || {};
+
+    if (authRequest) {
+      delete config.headers.Authorization;
+      return config;
+    }
+
+    const accessToken =
+      tokenStore.getAccessToken();
+
+    if (accessToken) {
+      config.headers.Authorization =
+        `Bearer ${accessToken}`;
+    } else {
+      delete config.headers.Authorization;
     }
 
     return config;
   },
-  (error) => Promise.reject(error)
+  (error) =>
+    Promise.reject(error)
 );
 
 client.interceptors.response.use(
   (response) => response,
   async (error) => {
-    const original = error.config;
+    const original =
+      error.config;
 
-    const isUnauthorized =
-      error.response?.status === 401;
+    if (!original) {
+      return Promise.reject(error);
+    }
 
-    const isAuthRequest =
-      original?.url?.startsWith("/auth/");
+    const status =
+      error.response?.status;
+
+    const authRequest =
+      isAuthRequest(original.url);
 
     if (
-      !isUnauthorized ||
-      !original ||
+      status !== 401 ||
       original._retry ||
-      isAuthRequest
+      authRequest
     ) {
       return Promise.reject(error);
     }
@@ -94,7 +157,8 @@ client.interceptors.response.use(
       const accessToken =
         await refreshAccessToken();
 
-      original.headers = original.headers || {};
+      original.headers =
+        original.headers || {};
 
       original.headers.Authorization =
         `Bearer ${accessToken}`;
@@ -115,10 +179,14 @@ client.interceptors.response.use(
           window.location.pathname
         )
       ) {
-        window.location.assign("/login");
+        window.location.assign(
+          "/login"
+        );
       }
 
-      return Promise.reject(refreshError);
+      return Promise.reject(
+        refreshError
+      );
     }
   }
 );
