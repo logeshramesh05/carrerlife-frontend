@@ -1,24 +1,50 @@
 import axios from "axios";
-import { clearSession, getAccessToken, getRefreshToken, saveSession } from "../auth/auth";
+import { tokenStore } from "./tokenStore";
 
-const baseURL = (
-  import.meta.env.VITE_API_BASE_URL ||
-  "http://localhost:8080/api/v1"
-).replace(/\/$/, "");
+const baseURL = import.meta.env.VITE_API_BASE_URL;
 
 const client = axios.create({
   baseURL,
-  headers: {
-    "Content-Type": "application/json"
-  }
+  timeout: 30000,
+});
+
+const refreshClient = axios.create({
+  baseURL,
+  timeout: 15000,
 });
 
 let refreshPromise = null;
 
-client.interceptors.request.use((config) => {
-  const token = getAccessToken();
+const refreshAccessToken = async () => {
+  if (!refreshPromise) {
+    const refreshToken = tokenStore.getRefreshToken();
+    if (!refreshToken) throw new Error("Refresh token unavailable");
 
-  if (token) {
+    refreshPromise = refreshClient
+      .post("/auth/refresh", { refreshToken })
+      .then(({ data }) => {
+        tokenStore.setTokens(data);
+        return data.accessToken;
+      })
+      .finally(() => {
+        refreshPromise = null;
+      });
+  }
+
+  return refreshPromise;
+};
+
+const clearSession = () => {
+  tokenStore.clear();
+  window.dispatchEvent(new Event("careerlife:logout"));
+};
+
+client.interceptors.request.use((config) => {
+  const token = tokenStore.getAccessToken();
+  const isAuthRequest = config.url?.startsWith("/auth/");
+
+  if (token && !isAuthRequest) {
+    config.headers = config.headers || {};
     config.headers.Authorization = `Bearer ${token}`;
   }
 
@@ -28,63 +54,31 @@ client.interceptors.request.use((config) => {
 client.interceptors.response.use(
   (response) => response,
   async (error) => {
-    const originalRequest = error.config;
+    const original = error.config;
+    const isUnauthorized = error.response?.status === 401;
+    const isAuthRequest = original?.url?.startsWith("/auth/");
 
-    if (
-      error.response?.status !== 401 ||
-      originalRequest?._retry ||
-      originalRequest?.url?.includes("/auth/refresh") ||
-      originalRequest?.url?.includes("/auth/login") ||
-      originalRequest?.url?.includes("/auth/register")
-    ) {
+    if (!isUnauthorized || !original || original._retry || isAuthRequest) {
       return Promise.reject(error);
     }
 
-    originalRequest._retry = true;
+    original._retry = true;
 
     try {
-      if (!refreshPromise) {
-        refreshPromise = refreshAccessToken().finally(() => {
-          refreshPromise = null;
-        });
-      }
-
-      const accessToken = await refreshPromise;
-
-      originalRequest.headers.Authorization = `Bearer ${accessToken}`;
-
-      return client(originalRequest);
+      const accessToken = await refreshAccessToken();
+      original.headers = original.headers || {};
+      original.headers.Authorization = `Bearer ${accessToken}`;
+      return client(original);
     } catch (refreshError) {
       clearSession();
-      window.location.href = "/login";
+
+      if (!["/login", "/register", "/docs", "/"].includes(window.location.pathname)) {
+        window.location.assign("/login");
+      }
+
       return Promise.reject(refreshError);
     }
   }
 );
-
-async function refreshAccessToken() {
-  const refreshToken = getRefreshToken();
-
-  if (!refreshToken) {
-    throw new Error("Refresh token is unavailable");
-  }
-
-  const response = await axios.post(`${baseURL}/auth/refresh`, {
-    refreshToken
-  });
-
-  const data = response.data;
-
-  saveSession({
-    accessToken: data.accessToken,
-    refreshToken: data.refreshToken,
-    user: {
-      name: data.name,
-      email: data.email
-    }
-  });
-
-  return data.accessToken;
-}
 
 export default client;
