@@ -1,5 +1,4 @@
 import axios from "axios";
-import { tokenStore } from "./tokenStore";
 
 const baseURL = (
   import.meta.env.VITE_API_BASE_URL ||
@@ -29,18 +28,7 @@ export const register = async (
     }
   );
 
-  const data = response.data;
-
-  if (
-    !data?.accessToken ||
-    !data?.refreshToken
-  ) {
-    throw new Error(
-      "Registration succeeded but authentication tokens were not returned"
-    );
-  }
-
-  return data;
+  return response.data;
 };
 
 export const login = async (
