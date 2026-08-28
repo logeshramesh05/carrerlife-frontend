@@ -1,46 +1,165 @@
-import { createContext, useContext, useState } from "react";
-import * as authApi from "../api/auth";
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useMemo,
+  useState
+} from "react";
+
+import {
+  login as loginApi,
+  register as registerApi,
+  logout as logoutApi
+} from "../api/auth";
+
 import { tokenStore } from "../api/tokenStore";
 
-const AuthContext = createContext(null);
+const AuthContext =
+  createContext(null);
 
-export function AuthProvider({ children }) {
-  const [user, setUser] = useState(() => tokenStore.getUser());
+export function AuthProvider({
+  children
+}) {
+  const [user, setUser] =
+    useState(() =>
+      tokenStore.getUser()
+    );
+
+  const [loading, setLoading] =
+    useState(true);
+
+  useEffect(() => {
+    const storedUser =
+      tokenStore.getUser();
+
+    const accessToken =
+      tokenStore.getAccessToken();
+
+    if (storedUser && accessToken) {
+      setUser(storedUser);
+    } else {
+      setUser(null);
+    }
+
+    setLoading(false);
+
+    const handleLogout = () => {
+      setUser(null);
+    };
+
+    window.addEventListener(
+      "careerlife:logout",
+      handleLogout
+    );
+
+    return () => {
+      window.removeEventListener(
+        "careerlife:logout",
+        handleLogout
+      );
+    };
+  }, []);
 
   const applySession = (data) => {
-    tokenStore.setTokens(data);
-    const currentUser = { email: data.email, name: data.name };
-    tokenStore.setUser(currentUser);
+    tokenStore.setSession(data);
+
+    const currentUser = {
+      name: data.name,
+      email: data.email
+    };
+
     setUser(currentUser);
+
+    return currentUser;
   };
 
-  const login = async (email, password) => {
-    const data = await authApi.login(email, password);
+  const register = async (
+    name,
+    email,
+    password
+  ) => {
+    const data =
+      await registerApi(
+        name,
+        email,
+        password
+      );
+
     applySession(data);
+
     return data;
   };
 
-  const register = async (name, email, password) => {
-    const data = await authApi.register(name, email, password);
+  const login = async (
+    email,
+    password
+  ) => {
+    const data =
+      await loginApi(
+        email,
+        password
+      );
+
     applySession(data);
+
     return data;
   };
 
   const logout = async () => {
-    const refreshToken = tokenStore.getRefreshToken();
+    const refreshToken =
+      tokenStore.getRefreshToken();
+
     try {
-      if (refreshToken) await authApi.logout(refreshToken);
+      if (refreshToken) {
+        await logoutApi(
+          refreshToken
+        );
+      }
     } finally {
       tokenStore.clear();
       setUser(null);
+
+      window.dispatchEvent(
+        new Event(
+          "careerlife:logout"
+        )
+      );
     }
   };
 
+  const value = useMemo(
+    () => ({
+      user,
+      loading,
+      isAuthenticated:
+        Boolean(
+          tokenStore.getAccessToken()
+        ),
+      register,
+      login,
+      logout
+    }),
+    [user, loading]
+  );
+
   return (
-    <AuthContext.Provider value={{ user, login, register, logout }}>
+    <AuthContext.Provider
+      value={value}
+    >
       {children}
     </AuthContext.Provider>
   );
 }
 
-export const useAuth = () => useContext(AuthContext);
+export function useAuth() {
+  const context =
+    useContext(AuthContext);
+
+  if (!context) {
+    throw new Error(
+      "useAuth must be used inside AuthProvider"
+    );
+  }
+
+  return context;
+}
