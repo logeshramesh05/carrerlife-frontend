@@ -5,7 +5,7 @@ const REFRESH_TOKEN_KEY =
   "careerlife_refresh_token";
 
 const USER_KEY =
-  "careerlife_user";
+  "careerLifeUser";
 
 export const tokenStore = {
   getAccessToken() {
@@ -63,12 +63,10 @@ export const tokenStore = {
   setSession(data) {
     this.setTokens(data);
 
-    if (data?.name || data?.email) {
-      this.setUser({
-        name: data.name,
-        email: data.email
-      });
-    }
+    this.setUser({
+      name: data.name,
+      email: data.email
+    });
   },
 
   clear() {
